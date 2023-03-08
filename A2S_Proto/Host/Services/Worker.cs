@@ -29,7 +29,8 @@ namespace Host.Services
                 .Add("info", A2sInfo, "A2S_INFO Query the V Rising Server.");
 
             _commands.PrintHelp();
-            await A2sInfoTest(new[] { "192.168.0.22:27016" });
+            await A2sInfoReceiveAsync(new[] { "192.168.0.22:27016" });
+            await A2sInfoReceiveFromAsync(new[] { "192.168.0.22:27016" });
             await Task.CompletedTask;
         }
 
@@ -87,7 +88,7 @@ namespace Host.Services
                 i % 100 == 0 ? 3 :
                 i % 10 == 0 ? 2 : 1);
         }
-        public async Task A2sInfoTest(string[] parameters)
+        public async Task A2sInfoReceiveFromAsync(string[] parameters)
         {
             var request = new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0x54, 0x53, 0x6F, 0x75, 0x72, 0x63, 0x65, 0x20, 0x45, 0x6E, 0x67, 0x69, 0x6E, 0x65, 0x20, 0x51, 0x75, 0x65, 0x72, 0x79, 0x00 };
             var ep = IPEndPoint.Parse(parameters[0]);
@@ -128,6 +129,50 @@ namespace Host.Services
             Buffer.BlockCopy(buffer, 4, data, 0, recv.ReceivedBytes - 4);
             Console.WriteLine(@"Received {0} bytes: {1}", recv.ReceivedBytes, ByteArrayToHexViaLookup32(data));
             PrintBytesToChar(data);
+
+            //using var ms = new MemoryStream(await udp.ReceiveAsync(ref ep));   // Saves the received data in a memory buffer
+            //var br = new BinaryReader(ms, Encoding.UTF8);     // A binary reader that treats characters as Unicode 8-bit
+            //ms.Seek(4, SeekOrigin.Begin);                           // skip the 4 0xFFs
+
+            //br.Close();
+            //ms.Close();
+            udp.Close();
+        }
+
+        public async Task A2sInfoReceiveAsync(string[] parameters)
+        {
+            var request = new byte[] { 0xFF, 0xFF, 0xFF, 0xFF, 0x54, 0x53, 0x6F, 0x75, 0x72, 0x63, 0x65, 0x20, 0x45, 0x6E, 0x67, 0x69, 0x6E, 0x65, 0x20, 0x51, 0x75, 0x65, 0x72, 0x79, 0x00 };
+            var ep = IPEndPoint.Parse(parameters[0]);
+            using var udp = new UdpClient();
+            Console.WriteLine(@"Sent {0} bytes: {1}", await udp.SendAsync(request, request.Length, ep), ByteArrayToHexViaLookup32(request));
+            PrintBytesToChar(request);
+
+            var receivedResult = await udp.ReceiveAsync();
+            Console.WriteLine(@"Received: {0}", ByteArrayToHexViaLookup32(receivedResult.Buffer));
+            PrintBytesToChar(receivedResult.Buffer);
+
+            // 0x41 = Challenge
+            if (receivedResult.Buffer.Length > 4 && receivedResult.Buffer[4] == 0x41)
+            {
+                // 0xFF, 0xFF, 0xFF, 0xFF, 0x41, [0x64, 0xC0, 0xCF, 0x7E]
+                var challenge = receivedResult.Buffer[5..];
+                Console.WriteLine(@"Challenge: {0}", ByteArrayToHexViaLookup32(challenge));
+                PrintBytesToChar(challenge);
+
+                byte[] requestWithChallenge = new byte[request.Length + challenge.Length];
+                Buffer.BlockCopy(request, 0, requestWithChallenge, 0, request.Length);
+                Buffer.BlockCopy(challenge, 0, requestWithChallenge, request.Length, challenge.Length);
+                Console.WriteLine(@"Sent {0} bytes with challenge: {1}", await udp.SendAsync(requestWithChallenge, requestWithChallenge.Length, ep), ByteArrayToHexViaLookup32(requestWithChallenge));
+                PrintBytesToChar(requestWithChallenge);
+
+                receivedResult = await udp.ReceiveAsync();
+                Console.WriteLine(@"Received: {0}", ByteArrayToHexViaLookup32(receivedResult.Buffer));
+                PrintBytesToChar(receivedResult.Buffer);
+            }
+
+            receivedResult = await udp.ReceiveAsync();
+            Console.WriteLine(@"Received: {0}", ByteArrayToHexViaLookup32(receivedResult.Buffer));
+            PrintBytesToChar(receivedResult.Buffer);
 
             //using var ms = new MemoryStream(await udp.ReceiveAsync(ref ep));   // Saves the received data in a memory buffer
             //var br = new BinaryReader(ms, Encoding.UTF8);     // A binary reader that treats characters as Unicode 8-bit
